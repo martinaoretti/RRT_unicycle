@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RRT Unicycle — Live Visualiser</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ── TOP BAR ── -->
+  <header id="topbar">
+    <h1>RRT // UNICYCLE</h1>
+    <div class="top-dot" id="dot"></div>
+    <span id="status-label">IDLE</span>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════ LEFT PANEL ══ -->
+  <aside id="left">
+
+    <!-- Config & Run -->
+    <div class="section">
+      <div class="section-title">Configuration</div>
+      <select id="sel-config">
+        <option value="">loading...</option>
+      </select>
+      <div class="btn-row">
+        <button class="btn primary" id="btn-start">▶ RUN</button>
+        <button class="btn danger" id="btn-stop" disabled>■ STOP</button>
+      </div>
+    </div>
+
+    <!-- Parameters -->
+    <div class="section">
+      <div class="section-title">Parameters</div>
+
+      <div class="field">
+        <div class="field-label">
+          <span>Iterations</span>
+          <span class="field-val" id="lbl-iter">4000</span>
+        </div>
+        <input type="range" id="sl-iter" min="500" max="10000" step="500" value="4000" />
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <span>Seed</span>
+          <span class="field-val" id="lbl-seed">42</span>
+        </div>
+        <input type="range" id="sl-seed" min="0" max="200" step="1" value="42" />
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <span>Goal bias</span>
+          <span class="field-val" id="lbl-gbias">15%</span>
+        </div>
+        <input type="range" id="sl-gbias" min="0" max="50" step="1" value="15" />
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <span>Render speed</span>
+          <span class="field-val" id="lbl-speed">×5</span>
+        </div>
+        <input type="range" id="sl-speed" min="1" max="50" step="1" value="5" />
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="section">
+      <div class="section-title">Legend</div>
+      <div class="legend-row">
+        <div class="legend-dot start"></div>
+        <span class="legend-label">Start pose</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-dot goal"></div>
+        <span class="legend-label">Goal pose</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-line tree"></div>
+        <span class="legend-label">RRT tree arcs</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-line solution"></div>
+        <span class="legend-label">Solution path</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-dot obstacle"></div>
+        <span class="legend-label">Obstacles</span>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ══════════════════════════════════════════════════ CANVAS ══ -->
+  <main id="canvas-wrap">
+    <canvas id="cv"></canvas>
+  </main>
+
+  <!-- ══════════════════════════════════════════════════ RIGHT PANEL ══ -->
+  <aside id="right">
+
+    <div id="result-badge"></div>
+
+    <!-- Live stats -->
+    <div class="section">
+      <div class="section-title">Live Stats</div>
+      <div id="stats-grid">
+        <div class="stat-box">
+          <span class="stat-val" id="st-nodes">0</span>
+          <div class="stat-label">Nodes</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-val" id="st-iter">0</span>
+          <div class="stat-label">Iter</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-val" id="st-path">—</span>
+          <div class="stat-label">Path len</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-val" id="st-fps">—</span>
+          <div class="stat-label">nodes/s</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="section" id="progress-wrap">
+      <div class="section-title">Progress</div>
+      <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+    </div>
+
+    <!-- Log -->
+    <div class="section section-no-bottom">
+      <div class="section-title">Event Log</div>
+    </div>
+    <div id="log"></div>
+
+  </aside>
+
+  <!-- ── BOTTOM BAR ── -->
+  <footer id="bottombar">
+    <span id="log-line">Ready. Select a configuration and press RUN.</span>
+    <span class="footer-status">WS: <span id="ws-status">disconnected</span></span>
+  </footer>
+
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RRT Unicycle — Live Visualiser</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060a12;--surf:#0c1320;--surf2:#111b2e;--bdr:#1a2d4a;
+  --cyan:#00e5ff;--cyan-d:rgba(0,229,255,.15);--cyan-g:rgba(0,229,255,.4);
+  --green:#39ff14;--green-d:rgba(57,255,20,.14);
+  --amber:#ffb347;--red:#ff3d5a;--red-d:rgba(255,61,90,.12);
+  --gray:#3a5070;--gray-l:#6a8aaa;
+  --text:#c8ddf0;--text-d:#4a6a88;
+  --mono:'JetBrains Mono',monospace;--disp:'Orbitron',monospace;
+  --r:5px;
+}
+html,body{width:100%;height:100%;background:var(--bg);color:var(--text);
+  font-family:var(--mono);font-size:13px;overflow:hidden}
+
+/* scanlines */
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,
+  rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px)}
+
+/* ── layout ── */
+#app{display:grid;grid-template-columns:252px 1fr 220px;
+  grid-template-rows:46px 1fr 34px;height:100vh}
+
+/* top bar */
+#topbar{grid-column:1/-1;display:flex;align-items:center;gap:16px;
+  padding:0 18px;background:var(--surf);border-bottom:1px solid var(--bdr)}
+#topbar h1{font-family:var(--disp);font-size:13px;letter-spacing:.14em;
+  color:var(--cyan);text-shadow:0 0 18px var(--cyan-g);white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--gray);flex-shrink:0}
+.dot.on{background:var(--green);box-shadow:0 0 10px var(--green);animation:blink 1.8s infinite}
+.dot.err{background:var(--red);box-shadow:0 0 10px var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+#status{font-size:11px;color:var(--gray-l);letter-spacing:.07em;margin-left:auto}
+
+/* panels */
+#left{grid-row:2;background:var(--surf);border-right:1px solid var(--bdr);
+  overflow-y:auto;display:flex;flex-direction:column}
+#canvas-wrap{grid-row:2;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);overflow:hidden;position:relative}
+#right{grid-row:2;background:var(--surf);border-left:1px solid var(--bdr);
+  display:flex;flex-direction:column;overflow:hidden}
+
+/* bottom */
+#bot{grid-column:1/-1;display:flex;align-items:center;gap:10px;
+  padding:0 14px;background:var(--surf);border-top:1px solid var(--bdr);
+  font-size:11px;color:var(--text-d);overflow:hidden}
+#bot-msg{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#bot-msg b{color:var(--cyan)}
+
+/* sections */
+.sec{border-bottom:1px solid var(--bdr);padding:13px 15px}
+.sec-t{font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--text-d);margin-bottom:11px}
+
+/* buttons */
+.row{display:flex;gap:7px}
+.btn{flex:1;padding:8px 0;border:1px solid var(--bdr);border-radius:var(--r);
+  background:var(--surf2);color:var(--gray-l);font-family:var(--mono);
+  font-size:11px;letter-spacing:.04em;cursor:pointer;transition:all .15s;
+  white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan);
+  background:var(--cyan-d)}
+.btn.pri{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-d)}
+.btn.pri:hover:not(:disabled){box-shadow:0 0 18px var(--cyan-g)}
+.btn.stop{border-color:var(--red);color:var(--red)}
+.btn.stop:hover:not(:disabled){background:var(--red-d)}
+.btn:disabled{opacity:.28;cursor:default}
+
+/* select */
+select{width:100%;padding:8px 28px 8px 9px;background:var(--surf2);
+  border:1px solid var(--bdr);border-radius:var(--r);color:var(--text);
+  font-family:var(--mono);font-size:12px;cursor:pointer;outline:none;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%233a5070'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center}
+select:focus{border-color:var(--cyan)}
+
+/* sliders */
+.fld{margin-bottom:11px}.fld:last-child{margin-bottom:0}
+.fld-lbl{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--gray-l);margin-bottom:5px}
+.fld-v{color:var(--cyan);font-weight:500}
+input[type=range]{width:100%;height:3px;-webkit-appearance:none;
+  background:var(--bdr);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;
+  width:13px;height:13px;border-radius:50%;background:var(--cyan);
+  box-shadow:0 0 7px var(--cyan-g);cursor:pointer}
+
+/* stats */
+#sg{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.sb{background:var(--surf2);border:1px solid var(--bdr);border-radius:var(--r);
+  padding:9px;text-align:center}
+.sv{font-family:var(--disp);font-size:17px;color:var(--cyan);display:block;line-height:1.2}
+.sl{font-size:9px;color:var(--text-d);letter-spacing:.1em;text-transform:uppercase;margin-top:3px}
+
+/* log */
+#log{flex:1;overflow-y:auto;padding:8px 13px;font-size:11px;
+  color:var(--text-d);line-height:1.9}
+#log::-webkit-scrollbar{width:3px}
+#log::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
+.le{display:flex;gap:7px}
+.ts{color:var(--gray);flex-shrink:0}
+.ok{color:var(--green)}.er{color:var(--red)}
+.inf{color:var(--cyan)}.wn{color:var(--amber)}
+
+/* progress */
+.pb-bg{height:3px;background:var(--bdr);border-radius:2px;overflow:hidden;margin-top:8px}
+.pb-fg{height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));
+  border-radius:2px;width:0%;transition:width .4s;box-shadow:0 0 8px var(--cyan-g)}
+
+/* result banner */
+#banner{display:none;padding:9px 14px;text-align:center;
+  font-family:var(--disp);font-size:10px;letter-spacing:.14em;
+  border-bottom:1px solid var(--bdr)}
+#banner.ok{display:block;color:var(--green);background:var(--green-d)}
+#banner.fail{display:block;color:var(--red);background:var(--red-d)}
+
+/* legend */
+.leg{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.leg:last-child{margin-bottom:0}
+.ld{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ll{width:18px;height:2px;flex-shrink:0;border-radius:1px}
+.lt{font-size:11px;color:var(--gray-l)}
+
+/* connecting overlay */
+#overlay{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;
+  background:rgba(6,10,18,.85);z-index:100}
+#overlay.hidden{display:none}
+.spinner{width:36px;height:36px;border:2px solid var(--bdr);
+  border-top-color:var(--cyan);border-radius:50%;
+  animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ov-msg{font-family:var(--disp);font-size:11px;letter-spacing:.14em;color:var(--cyan)}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- TOP BAR -->
+<header id="topbar">
+  <h1>RRT // UNICYCLE</h1>
+  <div class="dot" id="dot"></div>
+  <span id="status">CONNECTING...</span>
+</header>
+
+<!-- LEFT -->
+<aside id="left">
+
+  <div class="sec">
+    <div class="sec-t">Configuration</div>
+    <select id="cfg" style="margin-bottom:10px" disabled>
+      <option value="">Connecting to server...</option>
+    </select>
+    <div class="row">
+      <button class="btn pri" id="btn-run" disabled>&#9654; RUN</button>
+      <button class="btn stop" id="btn-stop" disabled>&#9632; STOP</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Parameters</div>
+    <div class="fld">
+      <div class="fld-lbl"><span>Iterations</span><span class="fld-v" id="v-iter">4000</span></div>
+      <input type="range" id="s-iter" min="500" max="10000" step="500" value="4000"/>
+    </div>
+    <div class="fld">
+      <div class="fld-lbl"><span>Seed</span><span class="fld-v" id="v-seed">42</span></div>
+      <input type="range" id="s-seed" min="0" max="200" step="1" value="42"/>
+    </div>
+    <div class="fld">
+      <div class="fld-lbl"><span>Goal bias</span><span class="fld-v" id="v-gbias">15%</span></div>
+      <input type="range" id="s-gbias" min="0" max="50" step="1" value="15"/>
+    </div>
+    <div class="fld">
+      <div class="fld-lbl"><span>Render speed</span><span class="fld-v" id="v-speed">x10</span></div>
+      <input type="range" id="s-speed" min="1" max="100" step="1" value="10"/>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Legend</div>
+    <div class="leg"><div class="ld" style="background:#1a4020;border:1.5px solid #39ff14"></div><span class="lt">Start pose</span></div>
+    <div class="leg"><div class="ld" style="background:#0e1e40;border:1.5px solid #4488ff"></div><span class="lt">Goal pose</span></div>
+    <div class="leg"><div class="ll" style="background:rgba(0,229,255,.45)"></div><span class="lt">RRT tree arcs</span></div>
+    <div class="leg"><div class="ll" style="background:#ff3d5a;height:3px"></div><span class="lt">Solution path</span></div>
+    <div class="leg"><div class="ld" style="border-radius:2px;background:#1e1008;border:1.5px solid #ffb347"></div><span class="lt">Obstacles</span></div>
+  </div>
+
+</aside>
+
+<!-- CANVAS -->
+<main id="canvas-wrap">
+  <div id="overlay">
+    <div class="spinner"></div>
+    <div class="ov-msg">CONNECTING TO SERVER...</div>
+  </div>
+  <canvas id="cv"></canvas>
+</main>
+
+<!-- RIGHT -->
+<aside id="right">
+
+  <div id="banner"></div>
+
+  <div class="sec">
+    <div class="sec-t">Live Stats</div>
+    <div id="sg">
+      <div class="sb"><span class="sv" id="s-nodes">0</span><div class="sl">Nodes</div></div>
+      <div class="sb"><span class="sv" id="s-iters">0</span><div class="sl">Iter</div></div>
+      <div class="sb"><span class="sv" id="s-path">-</span><div class="sl">Path</div></div>
+      <div class="sb"><span class="sv" id="s-rate">-</span><div class="sl">nodes/s</div></div>
+    </div>
+    <div class="pb-bg"><div class="pb-fg" id="pb"></div></div>
+  </div>
+
+  <div class="sec" style="padding-bottom:7px;flex:0">
+    <div class="sec-t">Event Log</div>
+  </div>
+  <div id="log"></div>
+
+</aside>
+
+<!-- BOTTOM -->
+<footer id="bot">
+  <span id="bot-msg">Waiting for server connection...</span>
+  <span style="color:var(--gray)">WS&nbsp;<span id="ws-lbl" style="color:var(--text-d)">---</span></span>
+</footer>
+
+</div><!-- #app -->
+
+<script>
+// ─────────────────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────────────────
+const cv   = document.getElementById('cv');
+const ctx  = cv.getContext('2d');
+const wrap = document.getElementById('canvas-wrap');
+
+let CVS = 600, SCALE = 6, WS = [0,0,100,100];
+
+function resizeCanvas() {
+  const r  = wrap.getBoundingClientRect();
+  const sz = Math.min(r.width, r.height) - 20;
+  CVS = Math.max(sz, 200);
+  cv.width = cv.height = CVS;
+  SCALE = CVS / (WS[2] - WS[0]);
+  dirty = true;
+}
+
+// world -> canvas (Y flipped)
+const wx = x => (x - WS[0]) * SCALE;
+const wy = y => CVS - (y - WS[1]) * SCALE;
+
+// ─────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────
+let treeNodes = [], pathNodes = [], obstacles = [];
+let startPose = null, goalPose = null;
+let running   = false, dirty = false;
+let totalIter = 4000, curIter = 0, nodeCount = 0;
+let _rateNodes = 0, _rateT = performance.now(), nodeRate = 0;
+
+// ─────────────────────────────────────────────────────────
+//  DRAW
+// ─────────────────────────────────────────────────────────
+function drawAll() {
+  ctx.clearRect(0, 0, CVS, CVS);
+  drawGrid();
+  drawObs();
+  drawTree();
+  drawPath();
+  if (startPose) drawRobot(startPose, 'rgba(20,60,25,.75)', '#39ff14');
+  if (goalPose)  drawRobot(goalPose,  'rgba(10,25,60,.75)', '#4488ff');
+  dirty = false;
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(26,45,74,.55)';
+  ctx.lineWidth = .5;
+  const step = 10 * SCALE;
+  for (let x = 0; x <= CVS + step; x += step) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CVS); ctx.stroke();
+  }
+  for (let y = 0; y <= CVS + step; y += step) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CVS,y); ctx.stroke();
+  }
+}
+
+function drawObs() {
+  for (const pts of obstacles) {
+    if (pts.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(wx(pts[0][0]), wy(pts[0][1]));
+    for (let i = 1; i < pts.length; i++)
+      ctx.lineTo(wx(pts[i][0]), wy(pts[i][1]));
+    ctx.closePath();
+    ctx.fillStyle   = 'rgba(240,150,40,.16)';
+    ctx.strokeStyle = '#ffb347';
+    ctx.lineWidth   = 1.3;
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function drawTree() {
+  ctx.strokeStyle = 'rgba(0,229,255,.32)';
+  ctx.lineWidth   = .85;
+  for (const nd of treeNodes) {
+    const a = nd.arc;
+    if (!a || a.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(wx(a[0][0]), wy(a[0][1]));
+    for (let i = 1; i < a.length; i++) ctx.lineTo(wx(a[i][0]), wy(a[i][1]));
+    ctx.stroke();
+  }
+}
+
+function drawPath() {
+  if (!pathNodes.length) return;
+  ctx.lineWidth   = 2.8;
+  ctx.strokeStyle = '#ff3d5a';
+  ctx.shadowColor = 'rgba(255,61,90,.55)';
+  ctx.shadowBlur  = 9;
+  for (const nd of pathNodes) {
+    const a = nd.arc;
+    if (!a || a.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(wx(a[0][0]), wy(a[0][1]));
+    for (let i = 1; i < a.length; i++) ctx.lineTo(wx(a[i][0]), wy(a[i][1]));
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+}
+
+function drawRobot(pose, fill, stroke) {
+  const [x, y, t] = pose;
+  const px = wx(x), py = wy(y);
+  const verts = [[-1.5,-1],[1.5,-1],[1.5,1],[-1.5,1]].map(([bx,by]) => [
+    px + (bx*Math.cos(t) - by*Math.sin(t)) * SCALE,
+    py - (bx*Math.sin(t) + by*Math.cos(t)) * SCALE,
+  ]);
+  ctx.beginPath();
+  ctx.moveTo(verts[0][0], verts[0][1]);
+  verts.slice(1).forEach(v => ctx.lineTo(v[0], v[1]));
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.strokeStyle = stroke; ctx.lineWidth = 1.8;
+  ctx.fill(); ctx.stroke();
+  const ar = 3.5 * SCALE;
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(px + Math.cos(t)*ar, py - Math.sin(t)*ar);
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke();
+}
+
+// animation loop
+(function loop() {
+  requestAnimationFrame(loop);
+  if (dirty) drawAll();
+})();
+
+// resize observer
+new ResizeObserver(resizeCanvas).observe(wrap);
+
+// ─────────────────────────────────────────────────────────
+//  DOM HELPERS
+// ─────────────────────────────────────────────────────────
+const $   = id => document.getElementById(id);
+const dot = $('dot'), statusEl = $('status');
+const overlay = $('overlay'), banner = $('banner');
+const logEl = $('log'), botMsg = $('bot-msg'), wsLbl = $('ws-lbl');
+const pb = $('pb');
+const sNodes = $('s-nodes'), sIters = $('s-iters'), sPath = $('s-path'), sRate = $('s-rate');
+const btnRun  = $('btn-run');
+const btnStop = $('btn-stop');
+const cfgSel  = $('cfg');
+
+function setStatus(label, cls) {
+  statusEl.textContent = label;
+  dot.className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+function log(msg, cls = '') {
+  const ts = new Date().toTimeString().slice(0,8);
+  const d  = document.createElement('div');
+  d.className = 'le';
+  d.innerHTML = `<span class="ts">${ts}</span><span class="${cls}">${msg}</span>`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  botMsg.innerHTML = `<b>${msg}</b>`;
+}
+
+function slider(sid, vid, fmt) {
+  const s = $(sid), v = $(vid);
+  v.textContent = fmt(s.value);
+  s.addEventListener('input', () => { v.textContent = fmt(s.value); });
+  return s;
+}
+slider('s-iter',  'v-iter',  n => (+n).toLocaleString());
+slider('s-seed',  'v-seed',  n => n);
+slider('s-gbias', 'v-gbias', n => n + '%');
+slider('s-speed', 'v-speed', n => 'x' + n);
+
+function setRunning(v) {
+  running = v;
+  btnRun.disabled  = v || !wsReady;
+  btnStop.disabled = !v;
+  cfgSel.disabled  = v;
+  if (v) setStatus('RUNNING', 'on');
+}
+
+function resetState() {
+  treeNodes = []; pathNodes = []; obstacles = [];
+  startPose = null; goalPose = null;
+  curIter = 0; nodeCount = 0; _rateNodes = 0; nodeRate = 0;
+  sNodes.textContent = '0'; sIters.textContent = '0';
+  sPath.textContent  = '-'; sRate.textContent  = '-';
+  pb.style.width = '0%';
+  banner.className = ''; banner.style.display = 'none';
+  dirty = true;
+}
+
+// ─────────────────────────────────────────────────────────
+//  RATE METER
+// ─────────────────────────────────────────────────────────
+setInterval(() => {
+  const now = performance.now();
+  const dt  = (now - _rateT) / 1000;
+  if (dt >= .8) {
+    const r = (nodeCount - _rateNodes) / dt;
+    sRate.textContent = Math.round(r);
+    _rateNodes = nodeCount; _rateT = now;
+  }
+}, 800);
+
+// ─────────────────────────────────────────────────────────
+//  WEBSOCKET
+// ─────────────────────────────────────────────────────────
+let ws = null, wsReady = false, retryTimer = null;
+
+function connectWS() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url   = `${proto}://${location.host}/ws`;
+  wsLbl.textContent = 'connecting...'; wsLbl.style.color = 'var(--amber)';
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    wsReady = true;
+    clearTimeout(retryTimer);
+    wsLbl.textContent = 'connected'; wsLbl.style.color = 'var(--cyan)';
+    overlay.classList.add('hidden');
+    setStatus('READY');
+    log('Server connected', 'inf');
+
+    // load configs now that connection is live
+    loadConfigs();
+  };
+
+  ws.onmessage = e => handleMsg(JSON.parse(e.data));
+
+  ws.onclose = ws.onerror = () => {
+    wsReady = false;
+    wsLbl.textContent = 'disconnected'; wsLbl.style.color = 'var(--red)';
+    overlay.classList.remove('hidden');
+    setStatus('DISCONNECTED', 'err');
+    cfgSel.disabled  = true;
+    btnRun.disabled  = true;
+    btnStop.disabled = true;
+    if (running) { running = false; }
+    retryTimer = setTimeout(connectWS, 2500);
+  };
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+// ─────────────────────────────────────────────────────────
+//  CONFIG LOADING  (HTTP, no WS dependency)
+// ─────────────────────────────────────────────────────────
+function loadConfigs() {
+  fetch('/configs')
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => {
+      cfgSel.innerHTML = '';
+      data.configs.forEach((c, i) => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.textContent = c;
+        if (c === 'random') opt.selected = true;
+        cfgSel.appendChild(opt);
+      });
+      cfgSel.disabled = false;
+      btnRun.disabled = false;
+      log(`${data.configs.length} configurations loaded`, 'inf');
+    })
+    .catch(err => {
+      log('Could not load configs: ' + err, 'er');
+      // retry after 2s
+      setTimeout(loadConfigs, 2000);
+    });
+}
+
+// ─────────────────────────────────────────────────────────
+//  MESSAGE HANDLER
+// ─────────────────────────────────────────────────────────
+function handleMsg(msg) {
+  switch (msg.type) {
+
+    case 'init': {
+      WS = msg.workspace;
+      resizeCanvas();
+      obstacles  = msg.obstacles;
+      startPose  = msg.start;
+      goalPose   = msg.goal;
+      totalIter  = parseInt($('s-iter').value);
+      log(`Config ready — ${msg.obstacles.length} obstacle(s)`, 'inf');
+      dirty = true;
+      break;
+    }
+
+    case 'batch': {
+      for (const ev of msg.events) {
+        treeNodes.push(ev.node);
+        nodeCount = ev.node.idx + 1;
+        curIter   = ev.iter;
+      }
+      sNodes.textContent = nodeCount;
+      sIters.textContent = curIter;
+      pb.style.width = Math.min(curIter / totalIter * 100, 100) + '%';
+      dirty = true;
+      break;
+    }
+
+    case 'node': {
+      treeNodes.push(msg.node);
+      nodeCount = msg.node.idx + 1;
+      curIter   = msg.iter;
+      sNodes.textContent = nodeCount;
+      sIters.textContent = curIter;
+      pb.style.width = Math.min(curIter / totalIter * 100, 100) + '%';
+      dirty = true;
+      break;
+    }
+
+    case 'path': {
+      pathNodes = msg.path_nodes;
+      sPath.textContent = msg.length;
+      log(`Path found — ${msg.length} nodes`, 'ok');
+      dirty = true;
+      break;
+    }
+
+    case 'done': {
+      if (msg.success) {
+        banner.className = 'ok';
+        banner.textContent = 'PATH FOUND';
+        banner.style.display = 'block';
+        setStatus('SUCCESS');
+        log(`Done: SUCCESS  tree=${msg.tree_size}  iter=${msg.iterations}`, 'ok');
+      } else {
+        banner.className = 'fail';
+        banner.textContent = 'NO PATH FOUND';
+        banner.style.display = 'block';
+        setStatus('FAILED', 'err');
+        log(`Done: FAILED  tree=${msg.tree_size}  iter=${msg.iterations}`, 'er');
+      }
+      pb.style.width = '100%';
+      sNodes.textContent = nodeCount;
+      sIters.textContent = curIter;
+      setRunning(false);
+      break;
+    }
+
+    case 'cancelled': {
+      log('Run stopped', 'wn');
+      setRunning(false);
+      setStatus('READY');
+      break;
+    }
+
+    case 'error': {
+      log('Error: ' + msg.msg, 'er');
+      setRunning(false);
+      setStatus('ERROR', 'err');
+      break;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  BUTTON HANDLERS
+// ─────────────────────────────────────────────────────────
+btnRun.addEventListener('click', () => {
+  resetState();
+  setRunning(true);
+  banner.style.display = 'none';
+  const params = {
+    action:     'start',
+    config:     cfgSel.value,
+    seed:       +$('s-seed').value,
+    iterations: +$('s-iter').value,
+    goal_bias:  +$('s-gbias').value / 100,
+    speed:      +$('s-speed').value,
+  };
+  log(`Starting: ${params.config}  seed=${params.seed}  iter=${params.iterations}`, 'inf');
+  send(params);
+});
+
+btnStop.addEventListener('click', () => {
+  send({ action: 'stop' });
+});
+
+// ─────────────────────────────────────────────────────────
+//  BOOT
+// ─────────────────────────────────────────────────────────
+resizeCanvas();
+connectWS();
+</script>
+</body>
+</html>
