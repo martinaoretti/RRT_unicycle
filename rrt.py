@@ -32,106 +32,78 @@ from collision import (
     is_pose_free,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-GOAL_BIAS: float = 0.15           # probability of sampling the goal
-GOAL_TOLERANCE: float = 4.0       # Euclidean threshold to declare success
-NEAREST_FALLBACK_K: int = 5       # try up to K nearest nodes
-MIN_ARC_STEPS: int = 2            # reject arcs shorter than this
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
+# costanti
+GOAL_BIAS: float = 0.15           # probability of sampling the goal 15%
+GOAL_TOLERANCE: float = 4.0       # tolleranza per dichiarare successo
+NEAREST_FALLBACK_K: int = 5       # prova i K nearest nodes (se il primo fallisce)
+MIN_ARC_STEPS: int = 2            # rifiuta archi troppo corti
 
+
+# strutture dati
 @dataclass
-class RRTNode:
-    """A node in the RRT tree storing full unicycle state."""
+class RRTNode: #definisco nodo
+    """Un nodo nell'albero RRT che memorizza lo stato completo dell'uniciclo"""
     x: float
     y: float
     theta: float
-    parent: Optional[int] = None          # index into tree list
+    parent: Optional[int] = None          # indice nella lista albero(nodo padre)
     arc_poses: List[Tuple[float, float, float]] = field(default_factory=list)
-    # intermediate poses along the arc from parent → this node (for drawing)
+    # lista delle pose intermedie lungo l'arco che collega il padre( per disegno)
 
 
 @dataclass
-class RRTResult:
+class RRTResult:    #oggetto che contiene il risultato finale
     """Container returned by the planner."""
     tree: List[RRTNode]
-    path_indices: Optional[List[int]]     # node indices from start to goal
+    path_indices: Optional[List[int]]     # indici dei nodi da start a goal 
     success: bool
-    snapshots: List[List[RRTNode]]        # tree snapshots for animation
+    snapshots: List[List[RRTNode]]        # istantanee albero per animazione
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
+# funzioni-----------------------------------------------------
 def _euclidean(ax: float, ay: float, bx: float, by: float) -> float:
-    """Euclidean distance on (x, y) only."""
+    """Distanza euclidea tra due punti """
     return math.sqrt((ax - bx) ** 2 + (ay - by) ** 2)
 
 
 def _k_nearest(tree: List[RRTNode], px: float, py: float, k: int) -> List[int]:
-    """Return indices of the *k* closest nodes by Euclidean (x, y) distance.
-
-    Complexity: O(n log n) due to sort — acceptable per spec.
-    """
+    """Ritorna gli indici dei k closest nodes con la distanza euclidea"""
     dists = [(_euclidean(n.x, n.y, px, py), idx) for idx, n in enumerate(tree)]
-    dists.sort(key=lambda t: t[0])
-    return [idx for _, idx in dists[:k]]
+    dists.sort(key=lambda t: t[0]) #ordina per distanza
+    return [idx for _, idx in dists[:k]] #restituisce i primi k
 
 
 def _extract_path(tree: List[RRTNode], goal_idx: int) -> List[int]:
-    """Walk parent pointers back to root and return forward-ordered indices."""
+    """Ripercorre i puntatori del genitore fino alla radice e restituisce gli indici in ordine progressivo. 
+    Restituisce il percorso dalla destinazione al punto di partenza."""
     path: List[int] = []
-    idx: Optional[int] = goal_idx
-    while idx is not None:
+    idx: Optional[int] = goal_idx #parto da goal
+    while idx is not None: #seguo i genitori
         path.append(idx)
         idx = tree[idx].parent
     path.reverse()
     return path
 
 
-# ---------------------------------------------------------------------------
-# Main RRT
-# ---------------------------------------------------------------------------
 
-def rrt(
+# Main RRT
+def rrt(    #costruisce l'albero fino a trovare il goal
     robot: Robot,
     obstacles: ObstacleList,
     start: Tuple[float, float, float],
     goal: Tuple[float, float, float],
-    num_iterations: int = 2000,
+    num_iterations: int = 2000, #massimo numero campionamento
     workspace: Tuple[float, float, float, float] = (0.0, 0.0, 100.0, 100.0),
-    dt: float = DEFAULT_DT,
-    velocity: float = DEFAULT_VELOCITY,
-    max_steps: int = MAX_STEPS_PER_ARC,
-    snapshot_interval: int = 10,
-    goal_check_interval: int = 50,
+    dt: float = DEFAULT_DT, #passo temporale di propagazione
+    velocity: float = DEFAULT_VELOCITY, #velocità lineare
+    max_steps: int = MAX_STEPS_PER_ARC, #limite al numero di passi di propagazione per arco
+    snapshot_interval: int = 10, #salva istantanea albero ogni N iterazione
+    goal_check_interval: int = 50, #ogni N iterazione prova a connettersi direttamente al goal 
+
 ) -> RRTResult:
-    """Run the RRT planner.
-
-    Parameters
-    ----------
-    robot              : Robot polygon model.
-    obstacles          : list of Shapely obstacle polygons.
-    start              : (x, y, θ) initial pose.
-    goal               : (x, y, θ) desired final pose (θ used only for the
-                         last connection; sampling is 2-D in x, y).
-    num_iterations     : maximum sampling rounds.
-    workspace          : (x_min, y_min, x_max, y_max).
-    dt                 : propagation time-step.
-    velocity           : constant linear speed.
-    max_steps          : cap on propagation steps per arc.
-    snapshot_interval  : save tree snapshot every N iterations.
-    goal_check_interval: try direct goal connection every N iterations.
-
-    Returns
-    -------
-    ``RRTResult`` with tree, path, success flag, and animation snapshots.
-    """
+   
     x_min, y_min, x_max, y_max = workspace
 
     root = RRTNode(x=start[0], y=start[1], theta=start[2])
@@ -139,20 +111,19 @@ def rrt(
     snapshots: List[List[RRTNode]] = [_snapshot(tree)]
 
     for iteration in range(1, num_iterations + 1):
-        # ----- sample -----
-        if random.random() < GOAL_BIAS:
+        #sample 
+        if random.random() < GOAL_BIAS: #con pr 15% scelgo il goal
             sx, sy = goal[0], goal[1]
-        else:
+        else: #altrimenti punto casuale
             sx = random.uniform(x_min, x_max)
             sy = random.uniform(y_min, y_max)
 
-        # ----- extend towards sample -----
-        new_node = _try_extend(tree, sx, sy, robot, obstacles, workspace,
-                               dt, velocity, max_steps)
+        #estensione con campionamento
+        new_node = _try_extend(tree, sx, sy, robot, obstacles, workspace, dt, velocity, max_steps)
         if new_node is not None:
             tree.append(new_node)
 
-        # ----- periodic goal connection attempt -----
+        #tentativo periodico di connessione al goal ogni N iterazioni
         if iteration % goal_check_interval == 0:
             goal_node = _try_connect_goal(tree, goal, robot, obstacles,
                                           workspace, dt, velocity, max_steps)
@@ -165,20 +136,19 @@ def rrt(
                                  success=True, snapshots=snapshots)
 
         if iteration % snapshot_interval == 0:
-            snapshots.append(_snapshot(tree))
+            snapshots.append(_snapshot(tree)) #salva stato albero
 
-    # exhausted iterations — no path found
+    # iterazioni esaurite - nessun path trovato 
     snapshots.append(_snapshot(tree))
     return RRTResult(tree=tree, path_indices=None,
                      success=False, snapshots=snapshots)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+
+# funzioni interne------------------------------------------
 
 def _snapshot(tree: List[RRTNode]) -> List[RRTNode]:
-    """Cheap shallow copy of the tree list for animation."""
+    """copia superficiale lista nodi per animazione """
     return list(tree)
 
 
@@ -190,38 +160,36 @@ def _try_extend(
     bounds: Tuple[float, float, float, float],
     dt: float, velocity: float, max_steps: int,
 ) -> Optional[RRTNode]:
-    """Attempt to grow the tree toward (sx, sy), trying up to K nearest
-    nodes as kinematic fallback."""
+    """prova a far crescere l'albero verso il punto campionato, provando i k-nearest nodes"""
     candidates = _k_nearest(tree, sx, sy, NEAREST_FALLBACK_K)
 
     for near_idx in candidates:
         near = tree[near_idx]
         arc = compute_arc(near.x, near.y, near.theta, sx, sy)
-        if arc is None:
+        if arc is None: #se impossibile -->salta
             continue
 
-        prop = propagate(near.x, near.y, near.theta, arc,
-                         dt=dt, velocity=velocity, max_steps=max_steps)
+        prop = propagate(near.x, near.y, near.theta, arc, dt=dt, velocity=velocity, max_steps=max_steps) #simula movimento
         if len(prop.poses) < MIN_ARC_STEPS:
             continue
 
-        ok, last_free = check_arc_collision(robot, prop.poses, obstacles, bounds)
+        ok, last_free = check_arc_collision(robot, prop.poses, obstacles, bounds) 
 
         if ok:
-            # full arc is collision-free
+            # l'arco è completamente collision-free
             final = prop.poses[-1]
             node = RRTNode(x=final[0], y=final[1], theta=final[2],
                            parent=near_idx, arc_poses=list(prop.poses))
             return node
         elif last_free >= MIN_ARC_STEPS:
-            # partial arc up to last collision-free pose
+            # l'arco è parzialmente collision-free 
             final = prop.poses[last_free]
             node = RRTNode(x=final[0], y=final[1], theta=final[2],
                            parent=near_idx,
                            arc_poses=list(prop.poses[:last_free + 1]))
             return node
 
-    return None  # none of the K nearest could extend
+    return None  # nessuno dei k era estendibile
 
 
 def _try_connect_goal(
@@ -232,27 +200,23 @@ def _try_connect_goal(
     bounds: Tuple[float, float, float, float],
     dt: float, velocity: float, max_steps: int,
 ) -> Optional[RRTNode]:
-    """Try connecting the closest tree nodes directly to the goal.
+    """prova a connettere il nodo piu vicino direttamente con il goal"""
 
-    For goal connection we allow a longer arc (up to 3× STEP_SIZE) so the
-    planner can close the last gap without requiring the tree to land
-    exactly on the goal.
-    """
     gx, gy, g_theta = goal
-    goal_max_dist = STEP_SIZE * 3.0  # allow longer reach for goal
-    candidates = _k_nearest(tree, gx, gy, min(len(tree), 10))
+    goal_max_dist = STEP_SIZE * 3.0  # Per la connessione al goal si permette un arco più lungo (STEP_SIZEx3)
+    candidates = _k_nearest(tree, gx, gy, min(len(tree), 10)) #10 nearest al goal
 
     for near_idx in candidates:
         near = tree[near_idx]
         dist_to_goal = _euclidean(near.x, near.y, gx, gy)
-        if dist_to_goal > goal_max_dist:
+        if dist_to_goal > goal_max_dist: #se troppo lontano salta
             continue
 
         arc = compute_arc(near.x, near.y, near.theta, gx, gy)
         if arc is None:
             continue
 
-        # For goal connection: propagate the full arc (not clamped to STEP_SIZE)
+        # per la connessione con il goal: propaga l'arco completo (non limitato da STEP_SIZE)
         goal_arc_length = min(arc.arc_length, goal_max_dist)
         prop = propagate(near.x, near.y, near.theta, arc,
                          dt=dt, velocity=velocity, max_steps=max_steps,
@@ -265,7 +229,7 @@ def _try_connect_goal(
             continue
 
         final = prop.poses[-1]
-        if _euclidean(final[0], final[1], gx, gy) < GOAL_TOLERANCE:
+        if _euclidean(final[0], final[1], gx, gy) < GOAL_TOLERANCE: #se vicino al goal-->successo
             node = RRTNode(x=final[0], y=final[1], theta=final[2],
                            parent=near_idx, arc_poses=list(prop.poses))
             return node

@@ -1,5 +1,5 @@
 """
-rrt_streamer.py  -  Generator-based RRT that yields JSON-safe events.
+rrt_streamer.py  -  invia aggiornamenti passo-passo per visualizzazione web/animazione.
 """
 from __future__ import annotations
 
@@ -19,15 +19,15 @@ from rrt import (
     RRTNode, _k_nearest, _euclidean, _extract_path,
     GOAL_BIAS, GOAL_TOLERANCE, NEAREST_FALLBACK_K, MIN_ARC_STEPS,
 )
-from obstacles import get_config
+from obstacles import get_config #carica scenari ostacoli
 
 Event = Dict[str, Any]
 
-
+#conversione nodo in dizionario: trasforma nodo RRT in formato JSON (per inviarlo al frontend)
 def _node_dict(node: RRTNode, idx: int) -> Dict[str, Any]:
     arc = []
-    if node.arc_poses:
-        arc = [[round(p[0], 3), round(p[1], 3), round(p[2], 4)] for p in node.arc_poses]
+    if node.arc_poses: #se il nodo ha un arco
+        arc = [[round(p[0], 3), round(p[1], 3), round(p[2], 4)] for p in node.arc_poses] #arrotonda pose per JSON
     return {
         "idx":    idx,
         "x":      round(node.x, 3),
@@ -37,7 +37,7 @@ def _node_dict(node: RRTNode, idx: int) -> Dict[str, Any]:
         "arc":    arc,
     }
 
-
+#unisce tutte le pose degli archi del percorso finale. Scorre tutti gli archi evitando duplicati e restituisce tutte le pose
 def _flatten_path_poses(path_nodes: List[Dict[str, Any]]) -> List[List[float]]:
     poses: List[List[float]] = []
     for node in path_nodes:
@@ -47,6 +47,7 @@ def _flatten_path_poses(path_nodes: List[Dict[str, Any]]) -> List[List[float]]:
     return poses
 
 
+#Sceglie dove provare a estendere l'albero. Trova una pos casuale dove il robot non collide.
 def _sample_free(
     robot,
     obstacles,
@@ -58,20 +59,21 @@ def _sample_free(
     for _ in range(3000):
         x = random.uniform(lo, hi)
         y = random.uniform(lo, hi)
-        if target is None:
+        if target is None: #se non c'è un goal verso a cui puntare-->orientazione casuale (tra -180° e +180°)
             t = random.uniform(-math.pi, math.pi)
         else:
             dx = target[0] - x
             dy = target[1] - y
-            if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            if abs(dx) < 1e-9 and abs(dy) < 1e-9: #se sono praticamente nulle
                 t = random.uniform(-math.pi, math.pi)
             else:
-                t = math.atan2(dy, dx)
+                t = math.atan2(dy, dx) #usa atan2 per orientare l'arco verso il goal
         if is_pose_free(robot, (x, y, t), obstacles, workspace):
             return (x, y, t)
     raise RuntimeError(f"Cannot find free pose in [{lo}, {hi}]")
 
 
+#calcola percorso e invia dati in tempo reale mentre l'albero cresce
 def rrt_stream(
     config_name: str,
     seed: int = 42,
@@ -80,21 +82,14 @@ def rrt_stream(
     goal_check_interval: int = 20,
     workspace: Tuple = (0.0, 0.0, 100.0, 100.0),
 ) -> Generator[Event, None, None]:
-    """
-    Yields:
-      {type:init,   obstacles, start, goal, workspace}
-      {type:node,   node, iter, tree_size}
-      {type:path,   path_nodes, length}
-      {type:done,   success, iterations, tree_size}
-      {type:error,  msg}
-    """
-    random.seed(seed)
+ 
+    random.seed(seed) #se uso lo stesso seme il robot farà sempre stesso percorso 
     np.random.seed(seed)
 
     x_min, y_min, x_max, y_max = workspace
 
     try:
-        obstacles, vert_arrays, start_r, goal_r = get_config(config_name)
+        obstacles, vert_arrays, start_r, goal_r = get_config(config_name) #carica mappa scelta
     except KeyError as e:
         yield {"type": "error", "msg": str(e)}
         return
@@ -102,7 +97,8 @@ def rrt_stream(
     robot = Robot()
 
     try:
-        goal  = _sample_free(robot, obstacles, goal_r[0], goal_r[1], workspace)
+        #crea una posizione libera per partenza e arrivo
+        goal  = _sample_free(robot, obstacles, goal_r[0], goal_r[1], workspace) 
         start = _sample_free(robot, obstacles, start_r[0], start_r[1], workspace,
                              target=(goal[0], goal[1]))
     except RuntimeError as e:
@@ -114,7 +110,8 @@ def rrt_stream(
         for va in vert_arrays
     ]
 
-    yield {
+    #manda al browser un primo messaggio con ostacoli, mappa start e goal
+    yield { 
         "type":      "init",
         "obstacles": obs_data,
         "start":     [round(start[0], 3), round(start[1], 3), round(start[2], 4)],
@@ -123,7 +120,7 @@ def rrt_stream(
     }
 
     root = RRTNode(x=start[0], y=start[1], theta=start[2])
-    tree: List[RRTNode] = [root]
+    tree: List[RRTNode] = [root] #istanzia albero
 
     def try_extend(sx, sy):
         for near_idx in _k_nearest(tree, sx, sy, NEAREST_FALLBACK_K):
@@ -140,8 +137,8 @@ def rrt_stream(
                 robot, prop.poses, obstacles, workspace)
             if ok:
                 final = prop.poses[-1]
-                return RRTNode(x=final[0], y=final[1], theta=final[2],
-                               parent=near_idx, arc_poses=list(prop.poses))
+                return RRTNode(x=final[0], y=final[1], theta=final[2], parent=near_idx, arc_poses=list(prop.poses))
+            
             elif last_free >= MIN_ARC_STEPS:
                 final = prop.poses[last_free]
                 return RRTNode(x=final[0], y=final[1], theta=final[2],
@@ -176,9 +173,9 @@ def rrt_stream(
         return None
 
     for iteration in range(1, num_iterations + 1):
-        if random.random() < goal_bias:
+        if random.random() < goal_bias: #implementa goal bias per spingere l'albero verso l'obbiettivo
             sx, sy = goal[0], goal[1]
-        else:
+        else: #se non scatta il bias-->punto casuale
             sx = random.uniform(x_min, x_max)
             sy = random.uniform(y_min, y_max)
 
@@ -186,7 +183,7 @@ def rrt_stream(
         if new_node is not None:
             new_idx = len(tree)
             tree.append(new_node)
-            yield {
+            yield { #invia dati nuovo nodo al browser
                 "type":      "node",
                 "node":      _node_dict(new_node, new_idx),
                 "iter":      iteration,
@@ -194,7 +191,7 @@ def rrt_stream(
             }
 
         if iteration % goal_check_interval == 0:
-            gn = try_connect_goal()
+            gn = try_connect_goal() #tenta di creare arco finale che arriva al goal
             if gn is not None:
                 goal_idx   = len(tree)
                 tree.append(gn)

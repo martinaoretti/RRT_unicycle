@@ -1,4 +1,4 @@
-numpy==1.26.4
-matplotlib==3.9.2
-shapely==2.0.6
-imageio==2.35.1
+numpy==1.26.4   #Array di vertici, calcoli vettoriali, seed random
+matplotlib==3.9.2 #Rendering figure, patch poligonali, annotazioni freccia
+shapely==2.0.6  #Poligoni precisi, test intersects() per collision detection
+imageio==2.35.1   #Scrittura PNG e GIF animate dal buffer in memoria

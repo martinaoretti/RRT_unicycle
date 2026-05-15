@@ -22,9 +22,8 @@ from shapely.geometry import Polygon as ShapelyPolygon
 
 from collision import ObstacleList
 
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
+
+# alias
 Region = Tuple[float, float]
 ObstacleConfig = Tuple[ObstacleList, List[np.ndarray], Region, Region]
 ConfigFactory = Callable[[], ObstacleConfig]
@@ -33,12 +32,11 @@ WORKSPACE_MIN: float = 0.0
 WORKSPACE_MAX: float = 100.0
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+
+# funzioni
 
 def _poly(vertices: List[Tuple[float, float]]) -> ShapelyPolygon:
-    """Create a Shapely polygon from a list of (x, y) vertices."""
+    """crea poligono(ostacolo) da una lista di vertici"""
     return ShapelyPolygon(vertices)
 
 
@@ -47,7 +45,7 @@ def _pack(
     start_region: Region = (5.0, 35.0),
     goal_region: Region = (65.0, 95.0),
 ) -> ObstacleConfig:
-    """Convert a list of Shapely polygons into the standard return tuple."""
+    """riceve una lista di poligoni Shapely, start e goal e ritorna la tupla standard (prepara il risultato finale)"""
     vert_arrays = [np.array(p.exterior.coords) for p in polygons]
     return polygons, vert_arrays, start_region, goal_region
 
@@ -55,7 +53,7 @@ def _pack(
 def _random_convex_polygon(
     cx: float, cy: float, size: float, n_verts: int,
 ) -> ShapelyPolygon:
-    """Generate a random convex polygon centred roughly at (cx, cy)."""
+    """genera ostacolo poligonale, convesso e casuale, centrato in (cx, cy)."""
     angles = sorted([random.uniform(0, 2 * math.pi) for _ in range(n_verts)])
     verts = [(cx + random.uniform(size * 0.4, size) * math.cos(a),
               cy + random.uniform(size * 0.4, size) * math.sin(a))
@@ -64,14 +62,16 @@ def _random_convex_polygon(
 
 
 def _rect(x: float, y: float, w: float, h: float) -> ShapelyPolygon:
-    """Axis-aligned rectangle with bottom-left corner at (x, y)."""
+    """costruisce il rettangolo"""
     return _poly([(x, y), (x + w, y), (x + w, y + h), (x, y + h)])
 
 
-# ---------------------------------------------------------------------------
-# Configuration: RANDOM  (original behaviour)
-# ---------------------------------------------------------------------------
+#---------------------------------------------------------------
+# CONFIGURAZIONI
+#---------------------------------------------------------------
 
+
+# RANDOM  
 def config_random() -> ObstacleConfig:
     """3–5 random convex polygons, non-overlapping."""
     n = random.randint(3, 5)
@@ -94,28 +94,26 @@ def config_random() -> ObstacleConfig:
     return _pack(obstacles)
 
 
-# ---------------------------------------------------------------------------
-# Configuration: NARROW_PASSAGE
-# Two large walls with a small gap in the middle.
-# ---------------------------------------------------------------------------
+#NARROW_PASSAGE 
+# due muri con passaggio stretto al centro
 
 def config_narrow_passage() -> ObstacleConfig:
     """Two horizontal walls with a narrow gap — tests tight manoeuvring."""
     wall_top = _rect(0, 55, 100, 8)
     wall_bot = _rect(0, 37, 100, 8)
-    # gap: remove a section from each wall
+    #rimuovere una sezione da ciascuna parete
     gap_left = 42.0
     gap_right = 58.0
-    # clip walls to leave a passage
+    
     from shapely.geometry import box
     clip = box(gap_left, 30, gap_right, 65)
     top_clipped = wall_top.difference(clip)
     bot_clipped = wall_bot.difference(clip)
-    # convert MultiPolygon to list if needed
+    # converi MultiPolygon in list se necessario
     obstacles: ObstacleList = []
-    for geom in [top_clipped, bot_clipped]:
+    for geom in [top_clipped, bot_clipped]: #se è diviso in pezzi
         if geom.geom_type == "MultiPolygon":
-            obstacles.extend(list(geom.geoms))
+            obstacles.extend(list(geom.geoms)) #aggiunge tutti i pezzi
         else:
             obstacles.append(geom)
     return _pack(obstacles,
@@ -123,10 +121,7 @@ def config_narrow_passage() -> ObstacleConfig:
                  goal_region=(70.0, 95.0))
 
 
-# ---------------------------------------------------------------------------
-# Configuration: MAZE
-# Grid of rectangular blocks forming corridors.
-# ---------------------------------------------------------------------------
+# MAZE (labirinto di rettangoli)
 
 def config_maze() -> ObstacleConfig:
     """Simple grid-based maze with corridors between blocks."""
@@ -148,10 +143,9 @@ def config_maze() -> ObstacleConfig:
                  goal_region=(80.0, 98.0))
 
 
-# ---------------------------------------------------------------------------
-# Configuration: CLUTTERED
+
+#CLUTTERED
 # Many small obstacles scattered across the workspace.
-# ---------------------------------------------------------------------------
 
 def config_cluttered() -> ObstacleConfig:
     """12–18 small obstacles densely spread across the space."""
@@ -177,35 +171,29 @@ def config_cluttered() -> ObstacleConfig:
                  goal_region=(85.0, 98.0))
 
 
-# ---------------------------------------------------------------------------
-# Configuration: L_SHAPED
-# Large L-shaped wall that forces a detour around it.
-# ---------------------------------------------------------------------------
+#  L_SHAPED
 
 def config_l_shaped() -> ObstacleConfig:
     """One large L-shaped obstacle blocking the direct path."""
-    # vertical bar
-    vert = _rect(40, 10, 12, 60)
-    # horizontal bar
-    horiz = _rect(40, 55, 40, 12)
-    # extra small blocks for variety
+    
+    vert = _rect(40, 10, 12, 60) #barra verticale
+    horiz = _rect(40, 55, 40, 12) #barra orizzontale
+
     block1 = _rect(15, 60, 10, 10)
     block2 = _rect(70, 20, 12, 12)
+
     return _pack([vert, horiz, block1, block2],
                  start_region=(5.0, 30.0),
                  goal_region=(70.0, 95.0))
 
 
-# ---------------------------------------------------------------------------
-# Configuration: DIAGONAL_WALLS
-# Rotated walls creating diagonal corridors.
-# ---------------------------------------------------------------------------
+#  DIAGONAL_WALLS
 
 def config_diagonal_walls() -> ObstacleConfig:
     """Diagonal walls crossing the workspace at ~45°."""
     def _rotated_rect(cx: float, cy: float, w: float, h: float,
                       angle: float) -> ShapelyPolygon:
-        """Rectangle centred at (cx,cy) rotated by *angle* radians."""
+        """Rectangle centred at (cx,cy) rotated by an angle."""
         cos_a, sin_a = math.cos(angle), math.sin(angle)
         hw, hh = w / 2, h / 2
         corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
@@ -221,13 +209,10 @@ def config_diagonal_walls() -> ObstacleConfig:
                  goal_region=(75.0, 98.0))
 
 
-# ---------------------------------------------------------------------------
-# Configuration: CONCENTRIC
-# Concentric polygonal rings with gaps — tests navigation through layers.
-# ---------------------------------------------------------------------------
-
+#  CONCENTRIC
 def config_concentric() -> ObstacleConfig:
-    """Two concentric octagonal rings with gaps."""
+    """Two concentric rings with gaps."""
+    
     def _ring_segment(cx: float, cy: float, r_in: float, r_out: float,
                       a_start: float, a_end: float,
                       n_pts: int = 8) -> ShapelyPolygon:
@@ -243,11 +228,11 @@ def config_concentric() -> ObstacleConfig:
     cx, cy = 50.0, 50.0
     obstacles: ObstacleList = []
 
-    # Outer ring: 3 segments with 2 gaps
+    # cerchio esterno: 3 segmenti con 2 gaps
     for a0, a1 in [(0.4, 1.8), (2.2, 3.8), (4.2, 5.9)]:
         obstacles.append(_ring_segment(cx, cy, 32, 38, a0, a1))
 
-    # Inner ring: 2 segments with 2 gaps
+    # cerchio esterno: 2 segmenti con 2 gaps
     for a0, a1 in [(0.8, 2.5), (3.5, 5.5)]:
         obstacles.append(_ring_segment(cx, cy, 16, 22, a0, a1))
 
@@ -256,9 +241,8 @@ def config_concentric() -> ObstacleConfig:
                  goal_region=(45.0, 55.0))
 
 
-# ---------------------------------------------------------------------------
+
 # Registry
-# ---------------------------------------------------------------------------
 
 CONFIGURATIONS: Dict[str, ConfigFactory] = {
     "random":          config_random,

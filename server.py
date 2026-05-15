@@ -8,13 +8,13 @@ Then open http://localhost:8000
 """
 from __future__ import annotations
 
-import asyncio
+import asyncio #gestione concorrenza(per real time)
 import json
 import sys
 from pathlib import Path
 from typing import Optional
 
-# Windows: force SelectorEventLoop (avoids ProactorEventLoop WS issues)
+# Windows: force SelectorEventLoop (avoids ProactorEventLoop WebSocket issues) 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -31,31 +31,31 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/")
+@app.get("/")   #apre la pagina web
 async def root():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     return HTMLResponse(html)
 
 
-@app.get("/configs")
+@app.get("/configs") #per dropdown nel frontend ostacoli
 async def configs():
     return {"configs": list_configs()}
 
 
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
+@app.websocket("/ws")   #canale comunicazione in tempo reale con il browser
+async def ws_endpoint(ws: WebSocket):   
     await ws.accept()
     current_task: Optional[asyncio.Task] = None
 
-    async def run_rrt(params: dict):
+    async def run_rrt(params: dict): #esegue eventi passo passo
         from rrt_streamer import rrt_stream
         import concurrent.futures
 
-        config    = params.get("config", "random")
-        seed      = int(params.get("seed", 42))
-        iters     = int(params.get("iterations", 4000))
-        gbias     = float(params.get("goal_bias", 0.15))
-        batch_sz  = max(1, int(params.get("speed", 10)))
+        config    = params.get("config", "random")  #tipo di mappa
+        seed      = int(params.get("seed", 42))     #riproducibilità
+        iters     = int(params.get("iterations", 4000)) #iterazioni RRT
+        gbias     = float(params.get("goal_bias", 0.15)) #probabilità del goal
+        batch_sz  = max(1, int(params.get("speed", 10))) #quanti nodi inviare insieme
 
         loop = asyncio.get_event_loop()
         gen  = rrt_stream(
@@ -67,64 +67,65 @@ async def ws_endpoint(ws: WebSocket):
 
         batch: list = []
 
-        async def flush():
+        async def flush():  #manda dati al browser
             nonlocal batch
             if batch:
                 await ws.send_text(json.dumps({"type": "batch", "events": batch}))
                 batch = []
 
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool: #crea thread separato
                 while True:
                     try:
-                        event = await loop.run_in_executor(pool, next, gen)
+                        event = await loop.run_in_executor(pool, next, gen) #prende il prossimo evento dal generatore RRT
                     except StopIteration:
                         await flush()
                         break
 
-                    if event["type"] == "node":
-                        batch.append(event)
-                        if len(batch) >= batch_sz:
+                    if event["type"] == "node": #controlla se è un nodo RRT
+                        batch.append(event)     #lo accumola
+                        if len(batch) >= batch_sz: #se batch pieno lo invia a browser
                             await flush()
                             await asyncio.sleep(0)
-                    else:
+                    else: #se non è un nodo invia goal trovato, collisione, errori
                         await flush()
                         await ws.send_text(json.dumps(event))
                         await asyncio.sleep(0)
 
-        except asyncio.CancelledError:
+        #gestione errori
+        except asyncio.CancelledError: #se l'utente ferma l'RRT informa il frontend
             await ws.send_text(json.dumps({"type": "cancelled"}))
         except Exception as exc:
             try:
-                await ws.send_text(json.dumps({"type": "error", "msg": str(exc)}))
+                await ws.send_text(json.dumps({"type": "error", "msg": str(exc)})) 
             except Exception:
                 pass
 
     try:
-        while True:
-            raw = await ws.receive_text()
+        while True:     #gestione dei messaggi dal browser 
+            raw = await ws.receive_text() #riceve messaggi dal frontend
             msg = json.loads(raw)
             action = msg.get("action", "")
 
-            if action == "start":
+            if action == "start":   #avvia RRT
+                if current_task and not current_task.done(): #sono gia in esecuzione-->lo ferma
+                    current_task.cancel()
+                    try:
+                        await current_task  
+                    except asyncio.CancelledError:
+                        pass
+                current_task = asyncio.create_task(run_rrt(msg)) #avvia nuovo RRT
+
+            elif action == "stop": #stop manuale
                 if current_task and not current_task.done():
                     current_task.cancel()
                     try:
                         await current_task
                     except asyncio.CancelledError:
                         pass
-                current_task = asyncio.create_task(run_rrt(msg))
+                await ws.send_text(json.dumps({"type": "cancelled"})) #aggiorna frontend
 
-            elif action == "stop":
-                if current_task and not current_task.done():
-                    current_task.cancel()
-                    try:
-                        await current_task
-                    except asyncio.CancelledError:
-                        pass
-                await ws.send_text(json.dumps({"type": "cancelled"}))
-
-    except WebSocketDisconnect:
+    except WebSocketDisconnect: #disconnessione 
         if current_task and not current_task.done():
             current_task.cancel()
     except Exception:
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     print("  ----------------------------------------")
     print("  Open ->  http://localhost:8000")
     print()
-    uvicorn.run(
+    uvicorn.run( #avvia server FastAPI
         "server:app",
         host="0.0.0.0",
         port=8000,
